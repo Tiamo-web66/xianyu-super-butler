@@ -1335,6 +1335,20 @@ class XianyuLive:
             # 检查滑块验证重试次数，防止无限递归
             if captcha_retry_count >= self.max_captcha_verification_count:
                 logger.error(f"【{self.cookie_id}】滑块验证重试次数已达上限 ({self.max_captcha_verification_count})，停止重试")
+
+                # 记录风控日志 - 滑块验证达到上限
+                try:
+                    from db_manager import db_manager
+                    db_manager.add_risk_control_log(
+                        cookie_id=self.cookie_id,
+                        event_type='captcha_max_retries',
+                        event_description=f"滑块验证重试次数已达上限 ({self.max_captcha_verification_count}次)，需要手动处理",
+                        processing_status='failed',
+                        processing_result="已停止自动重试，请手动登录或重新扫码"
+                    )
+                except Exception as log_e:
+                    logger.error(f"【{self.cookie_id}】记录风控日志失败: {log_e}")
+
                 await self.send_token_refresh_notification(
                     f"滑块验证重试次数已达上限，请手动处理",
                     "captcha_max_retries_exceeded"
@@ -1623,9 +1637,21 @@ class XianyuLive:
                     if isinstance(res_json, dict):
                         res_json_str = json.dumps(res_json, ensure_ascii=False, separators=(',', ':'))
                         if '令牌过期' in res_json_str or 'Session过期' in res_json_str:
+                            # 记录风控日志 - 令牌/Session过期
+                            try:
+                                from db_manager import db_manager
+                                db_manager.add_risk_control_log(
+                                    cookie_id=self.cookie_id,
+                                    event_type='token_expired',
+                                    event_description="检测到令牌/Session过期，需要重新登录",
+                                    processing_status='processing'
+                                )
+                            except Exception as log_e:
+                                logger.error(f"【{self.cookie_id}】记录风控日志失败: {log_e}")
+
                             # 调用统一的密码登录刷新方法
                             refresh_success = await self._try_password_login_refresh("令牌/Session过期")
-                            
+
                             if not refresh_success:
                                 # 标记已发送通知，避免重复通知
                                 notification_sent = True
@@ -1647,15 +1673,35 @@ class XianyuLive:
                     if not notification_sent:
                         # 检查WebSocket连接状态
                         is_ws_connected = (
-                            self.connection_state == ConnectionState.CONNECTED and 
-                            self.ws and 
+                            self.connection_state == ConnectionState.CONNECTED and
+                            self.ws and
                             not self.ws.closed
                         )
-                        
+
                         if is_ws_connected:
                             logger.info(f"【{self.cookie_id}】WebSocket连接正常，Token刷新失败可能是暂时的，跳过失败通知")
                         else:
                             logger.warning(f"【{self.cookie_id}】WebSocket未连接，发送Token刷新失败通知")
+
+                            # 记录风控日志 - Cookie过期/Token刷新失败
+                            try:
+                                from db_manager import db_manager
+                                # 提取错误信息
+                                error_msg = ""
+                                if isinstance(res_json, dict):
+                                    ret_value = res_json.get('ret', [])
+                                    if ret_value:
+                                        error_msg = ret_value[0] if isinstance(ret_value, list) else str(ret_value)
+                                db_manager.add_risk_control_log(
+                                    cookie_id=self.cookie_id,
+                                    event_type='cookie_expired',
+                                    event_description=f"Cookie过期或Token刷新失败，需要重新登录",
+                                    processing_status='failed',
+                                    processing_result=f"错误信息: {error_msg[:200] if error_msg else '未知错误'}"
+                                )
+                            except Exception as log_e:
+                                logger.error(f"【{self.cookie_id}】记录风控日志失败: {log_e}")
+
                             await self.send_token_refresh_notification(f"Token刷新失败: {res_json}", "token_refresh_failed")
                     else:
                         logger.info(f"【{self.cookie_id}】已发送滑块验证相关通知，跳过Token刷新失败通知")
@@ -1672,15 +1718,29 @@ class XianyuLive:
             if not notification_sent:
                 # 检查WebSocket连接状态
                 is_ws_connected = (
-                    self.connection_state == ConnectionState.CONNECTED and 
-                    self.ws and 
+                    self.connection_state == ConnectionState.CONNECTED and
+                    self.ws and
                     not self.ws.closed
                 )
-                
+
                 if is_ws_connected:
                     logger.info(f"【{self.cookie_id}】WebSocket连接正常，Token刷新异常可能是暂时的，跳过失败通知")
                 else:
                     logger.warning(f"【{self.cookie_id}】WebSocket未连接，发送Token刷新异常通知")
+
+                    # 记录风控日志 - Token刷新异常
+                    try:
+                        from db_manager import db_manager
+                        db_manager.add_risk_control_log(
+                            cookie_id=self.cookie_id,
+                            event_type='token_refresh_error',
+                            event_description=f"Token刷新过程中发生异常",
+                            processing_status='failed',
+                            error_message=str(e)[:500]
+                        )
+                    except Exception as log_e:
+                        logger.error(f"【{self.cookie_id}】记录风控日志失败: {log_e}")
+
                     await self.send_token_refresh_notification(f"Token刷新异常: {str(e)}", "token_refresh_exception")
             else:
                 logger.info(f"【{self.cookie_id}】已发送滑块验证相关通知，跳过Token刷新异常通知")
@@ -7003,7 +7063,7 @@ class XianyuLive:
             }
 
             async with self.session.post(
-                api_config.get('url', 'http://localhost:8080/xianyu/reply'),
+                api_config.get('url', f'http://localhost:{os.getenv("API_PORT", "8090")}/xianyu/reply'),
                 json=payload,
                 timeout=timeout
             ) as response:

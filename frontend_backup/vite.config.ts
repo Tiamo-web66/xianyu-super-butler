@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+// 后端基础 URL，支持通过环境变量 VITE_BACKEND_URL 覆盖
+const backendUrl = process.env.VITE_BACKEND_URL || backendUrl
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
   plugins: [react()],
@@ -20,11 +23,11 @@ export default defineConfig(({ command }) => ({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/login': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         bypass: (req) => {
           if (req.method === 'GET') {
@@ -33,32 +36,32 @@ export default defineConfig(({ command }) => ({
         },
       },
       '/verify': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/cookies': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/delivery-rules': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/system-settings': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/logs': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/users': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       // 管理员API - 前端有 /admin/* 路由，需要区分浏览器访问和 API 请求
       '/admin': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         bypass: (req) => {
           // 浏览器直接访问（Accept 包含 text/html）时，让前端路由处理
@@ -68,39 +71,39 @@ export default defineConfig(({ command }) => ({
         },
       },
       '/risk-control-logs': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/qrcode': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/generate-captcha': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/verify-captcha': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/send-verification-code': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/registration-status': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/login-info-status': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/geetest': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/register': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         bypass: (req) => {
           // 浏览器直接访问时返回前端页面，只有 POST 请求才代理到后端
@@ -110,88 +113,88 @@ export default defineConfig(({ command }) => ({
         },
       },
       '/itemReplays': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/item-reply': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/default-replies': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/ai-reply-settings': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/ai-reply-test': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/password-login': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/qr-login': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/keywords-export': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/keywords-import': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/upload-image': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/default-reply': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/static': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/backup': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/project-stats': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/change-password': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/change-admin-password': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/check-default-password': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/logout': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/user-settings': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       '/search': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
       // 商品管理 - 前端有 /items 路由，需要区分浏览器访问和 API 请求
       '/items': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         bypass: (req) => {
           // 只有浏览器直接访问 /items 路径时才返回前端页面
@@ -206,7 +209,7 @@ export default defineConfig(({ command }) => ({
       },
       // 卡券管理 - 前端有 /cards 路由
       '/cards': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         bypass: (req) => {
           if (req.headers.accept?.includes('text/html')) {
@@ -216,7 +219,7 @@ export default defineConfig(({ command }) => ({
       },
       // 通知渠道 - 前端有 /notification-channels 路由
       '/notification-channels': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         bypass: (req) => {
           if (req.headers.accept?.includes('text/html')) {
@@ -226,7 +229,7 @@ export default defineConfig(({ command }) => ({
       },
       // 消息通知 - 前端有 /message-notifications 路由
       '/message-notifications': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         bypass: (req) => {
           if (req.headers.accept?.includes('text/html')) {
@@ -236,7 +239,7 @@ export default defineConfig(({ command }) => ({
       },
       // 关键词 - 前端有 /keywords 路由
       '/keywords': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         bypass: (req) => {
           if (req.headers.accept?.includes('text/html')) {
@@ -246,7 +249,7 @@ export default defineConfig(({ command }) => ({
       },
       // 订单 API - 后端路径是 /api/orders
       '/api/orders': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
       },
     },

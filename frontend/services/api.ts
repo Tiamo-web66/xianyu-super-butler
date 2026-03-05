@@ -18,8 +18,31 @@ export const logout = async (): Promise<ApiResponse> => {
   return post('/logout', {});
 };
 
+export const getRegistrationStatus = async (): Promise<{ enabled: boolean; message: string }> => {
+  return get('/registration-status');
+};
+
 export const changePassword = async (currentPassword: string, newPassword: string): Promise<ApiResponse> => {
   return post('/change-password', { current_password: currentPassword, new_password: newPassword });
+};
+
+// Register
+export const register = async (data: { username: string; email: string; password: string; verification_code: string }): Promise<ApiResponse> => {
+  // 开发模式使用完整后端URL，生产模式使用相对路径
+  const url = import.meta.env.DEV ? 'http://127.0.0.1:8090/register' : '/register';
+  return post(url, data);
+};
+
+export const sendVerificationCode = async (email: string, type: string = 'register'): Promise<ApiResponse> => {
+  return post('/send-verification-code', { email, type });
+};
+
+export const getGeetestConfig = async (): Promise<{ success: boolean; data?: any }> => {
+  return get('/geetest/register');
+};
+
+export const getGuestTrialStatus = async (): Promise<{ enabled: boolean }> => {
+  return get('/guest-trial-status');
 };
 
 // Accounts
@@ -244,6 +267,14 @@ export const createItem = async (cookieId: string, data: any): Promise<any> => {
 
 export const updateItem = async (cookieId: string, itemId: string, data: any): Promise<any> => {
     return put(`/items/${cookieId}/${itemId}`, data);
+}
+
+export const updateItemMultiSpec = async (cookieId: string, itemId: string, isMultiSpec: boolean): Promise<any> => {
+    return put(`/items/${cookieId}/${itemId}/multi-spec`, { is_multi_spec: isMultiSpec });
+}
+
+export const updateItemMultiQtyDelivery = async (cookieId: string, itemId: string, multiQtyDelivery: boolean): Promise<any> => {
+    return put(`/items/${cookieId}/${itemId}/multi-quantity-delivery`, { multi_quantity_delivery: multiQtyDelivery });
 }
 
 // Rules - 发货规则 (使用正确的后端API)
@@ -473,4 +504,98 @@ export const deleteDefaultReply = async (cookieId: string): Promise<ApiResponse>
 
 export const clearDefaultReplyRecords = async (cookieId: string): Promise<ApiResponse> => {
   return post(`/api/default-reply/${cookieId}/clear-records`, {});
+};
+
+// Logs
+export interface LogStats {
+  total_logs: number;
+  level_counts: Record<string, number>;
+  source_counts: Record<string, number>;
+  max_logs?: number;
+  log_file?: string;
+  is_filtered?: boolean;
+}
+
+export interface LogResponse {
+  success: boolean;
+  logs: any[];
+  is_admin: boolean;
+}
+
+export interface LogStatsResponse {
+  success: boolean;
+  stats: LogStats;
+  is_admin: boolean;
+}
+
+export const getLogs = async (lines: number = 200, level?: string): Promise<LogResponse> => {
+  const params: any = { lines };
+  if (level && level !== 'all') params.level = level;
+  return get('/logs', params);
+};
+
+export const getLogStats = async (): Promise<LogStatsResponse> => {
+  return get('/logs/stats');
+};
+
+export const clearLogs = async (): Promise<ApiResponse> => {
+  return post('/logs/clear', {});
+};
+
+// Risk Control Logs
+export interface RiskControlLog {
+  id: number;
+  cookie_id: string;
+  event_type: string;
+  message: string;
+  created_at: string;
+}
+
+export const getRiskControlLogs = async (cookieId?: string, limit: number = 100, offset: number = 0): Promise<{
+  success: boolean;
+  data: RiskControlLog[];
+  total: number;
+}> => {
+  const params: any = { limit, offset };
+  if (cookieId) params.cookie_id = cookieId;
+  return get('/risk-control-logs', params);
+};
+
+// Admin Logs
+export const getAdminLogs = async (lines: number = 200, level?: string): Promise<LogResponse> => {
+  const params: any = { lines };
+  if (level && level !== 'all') params.level = level;
+  return get('/admin/logs', params);
+};
+
+// Login Logs
+export interface LoginLog {
+  id: number;
+  username: string;
+  action: string;
+  status: string;
+  ip_address: string;
+  user_agent: string;
+  reason: string;
+  created_at: string;
+}
+
+export const getLoginLogs = async (username?: string, action?: string, limit: number = 100, offset: number = 0): Promise<{
+  success: boolean;
+  data: LoginLog[];
+  total: number;
+}> => {
+  const params: any = { limit, offset };
+  if (username) params.username = username;
+  if (action && action !== 'all') params.action = action;
+  return get('/login-logs', params);
+};
+
+// User Settings
+export const getUserSetting = async (key: string): Promise<{ success: boolean; value?: string }> => {
+  return get(`/user-settings/${key}`);
+};
+
+export const setUserSetting = async (key: string, value: string): Promise<ApiResponse> => {
+  return put(`/user-settings/${key}`, { value });
 };

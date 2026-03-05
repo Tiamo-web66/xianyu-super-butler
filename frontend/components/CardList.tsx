@@ -571,7 +571,7 @@ const CardList: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto -mr-2 pr-2">
+            <div className="modal-body flex-1 overflow-y-auto">
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">卡密名称</label>

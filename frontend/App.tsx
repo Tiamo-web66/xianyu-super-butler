@@ -7,8 +7,10 @@ import CardList from './components/CardList';
 import ItemList from './components/ItemList';
 import Settings from './components/Settings';
 import Keywords from './components/Keywords';
-import { login, verifyToken } from './services/api';
-import { ShieldCheck, ArrowRight, Loader2, Sparkles, User, Lock, KeyRound } from 'lucide-react';
+import LogViewer from './components/LogViewer';
+import Register from './components/Register';
+import { login, verifyToken, getRegistrationStatus, getGuestTrialStatus } from './services/api';
+import { ShieldCheck, ArrowRight, Loader2, Sparkles, User, Lock, KeyRound, UserPlus } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -17,7 +19,35 @@ const App: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const [guestTrialEnabled, setGuestTrialEnabled] = useState(true);
   const [loginError, setLoginError] = useState('');
+  const [currentPage, setCurrentPage] = useState<'login' | 'register'>('login');
+
+  // Check if accessing register page
+  useEffect(() => {
+    if (window.location.pathname === '/register') {
+      setCurrentPage('register');
+    }
+  }, []);
+
+  // Check registration status on mount
+  useEffect(() => {
+      getRegistrationStatus().then(res => {
+          setRegistrationEnabled(res.enabled);
+      }).catch(() => {
+          setRegistrationEnabled(true); // 默认开启
+      });
+  }, []);
+
+  // Check guest trial status on mount
+  useEffect(() => {
+      getGuestTrialStatus().then(res => {
+          setGuestTrialEnabled(res.enabled);
+      }).catch(() => {
+          setGuestTrialEnabled(true); // 默认开启
+      });
+  }, []);
 
   // Check auth on mount
   useEffect(() => {
@@ -75,6 +105,12 @@ const App: React.FC = () => {
 
   // Login Screen Component
   if (!isLoggedIn) {
+    // Register Page
+    if (currentPage === 'register') {
+      return <Register onSwitchToLogin={() => setCurrentPage('login')} />;
+    }
+
+    // Login Page
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F4F5F7] p-4 relative overflow-hidden font-sans">
         {/* Animated Background Blobs */}
@@ -122,17 +158,29 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={loginLoading}
               className="w-full ios-btn-primary h-14 rounded-2xl text-lg shadow-xl shadow-yellow-200 mt-2 flex items-center justify-center gap-2 group disabled:opacity-70"
             >
               {loginLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>立即登录 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" /></>}
             </button>
+
+            {registrationEnabled && (
+              <button
+                type="button"
+                onClick={() => window.location.href = '/register'}
+                className="w-full mt-3 h-12 rounded-2xl text-base font-medium text-gray-600 border border-gray-200 flex items-center justify-center gap-2 hover:bg-gray-50 transition-all"
+              >
+                <UserPlus className="w-5 h-5" />
+                没有账号？立即注册
+              </button>
+            )}
           </form>
           
           <div className="mt-8 pt-6 border-t border-gray-100">
-             <button 
+             {guestTrialEnabled && (
+             <button
                 type="button"
                 onClick={handleTestEntry}
                 disabled={loginLoading}
@@ -141,6 +189,7 @@ const App: React.FC = () => {
                 <KeyRound className="w-5 h-5 text-[#FFE815]" />
                 游客试用 (无需账号)
              </button>
+             )}
              <div className="mt-6 text-center">
                  <span className="text-xs text-gray-400 font-medium tracking-widest uppercase">
                     Xianyu Auto-Dispatch Pro v2.5
@@ -162,6 +211,7 @@ const App: React.FC = () => {
       case 'items': return <ItemList />;
       case 'keywords': return <Keywords />;
       case 'settings': return <Settings />;
+      case 'logs': return <LogViewer />;
       default: return <Dashboard />;
     }
   };

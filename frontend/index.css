@@ -292,10 +292,60 @@ body {
 
 .modal-header {
   flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
   padding: 2rem 2rem 1.5rem;
   border-bottom: 1px solid #F3F4F6;
   background-color: white;
   z-index: 10;
+}
+
+/* 开关按钮样式 */
+.switch-toggle {
+  position: relative;
+  width: 52px;
+  height: 32px;
+  border-radius: 16px;
+  transition: background-color 0.3s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.switch-toggle.active {
+  background-color: #FFE815;
+}
+
+.switch-toggle.inactive {
+  background-color: #D1D5DB;
+}
+
+.switch-toggle-thumb {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: 24px;
+  height: 24px;
+  background-color: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: left 0.3s ease;
+  pointer-events: none;
+}
+
+.switch-toggle.active .switch-toggle-thumb {
+  left: 24px;
+}
+
+.switch-toggle.inactive .switch-toggle-thumb {
+  left: 4px;
 }
 
 .modal-body {

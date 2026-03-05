@@ -253,6 +253,7 @@ class DBManager:
                 self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_name TEXT DEFAULT ''")
                 self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_phone TEXT DEFAULT ''")
                 self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_address TEXT DEFAULT ''")
+                self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_city TEXT DEFAULT ''")
                 logger.info("orders 表收货人信息列添加完成")
 
             # 检查并添加 version 列（用于乐观锁）
@@ -453,6 +454,20 @@ class DBManager:
             )
             ''')
 
+            # 创建登录日志表
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS login_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL,
+                ip_address TEXT,
+                user_agent TEXT,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            ''')
+
             # 创建风控日志表
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS risk_control_logs (
@@ -474,6 +489,7 @@ class DBManager:
             INSERT OR IGNORE INTO system_settings (key, value, description) VALUES
             ('theme_color', 'blue', '主题颜色'),
             ('registration_enabled', 'true', '是否开启用户注册'),
+            ('password_pattern', '(?=.*[0-9])(?=.*[a-zA-Z]).{8,20}', '密码正则规则'),
             ('show_default_login_info', 'true', '是否显示默认登录信息'),
             ('login_captcha_enabled', 'true', '登录滑动验证码开关'),
             ('smtp_server', '', 'SMTP服务器地址'),
@@ -811,6 +827,14 @@ class DBManager:
                     # receiver_address字段不存在，需要添加
                     self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_address TEXT")
                     logger.info("为orders表添加receiver_address字段")
+
+                # 检查orders表是否有receiver_city字段
+                try:
+                    self._execute_sql(cursor, "SELECT receiver_city FROM orders LIMIT 1")
+                except sqlite3.OperationalError:
+                    # receiver_city字段不存在，需要添加
+                    self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_city TEXT")
+                    logger.info("为orders表添加receiver_city字段")
 
                 # 检查orders表是否有system_shipped字段（系统是否已发货）
                 try:
@@ -1260,30 +1284,37 @@ class DBManager:
     
     # -------------------- Cookie操作 --------------------
     def save_cookie(self, cookie_id: str, cookie_value: str, user_id: int = None) -> bool:
-        """保存Cookie到数据库，如存在则更新"""
+        """保存Cookie到数据库，如存在则只更新value字段，保留其他字段"""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
 
-                # 如果没有提供user_id，尝试从现有记录获取，否则使用admin用户ID
-                if user_id is None:
-                    self._execute_sql(cursor, "SELECT user_id FROM cookies WHERE id = ?", (cookie_id,))
-                    existing = cursor.fetchone()
-                    if existing:
-                        user_id = existing[0]
-                    else:
+                # 检查记录是否已存在
+                self._execute_sql(cursor, "SELECT id, user_id FROM cookies WHERE id = ?", (cookie_id,))
+                existing = cursor.fetchone()
+
+                if existing:
+                    # 记录已存在，只更新 value 字段，保留其他字段（备注、账号密码等）
+                    self._execute_sql(cursor,
+                        "UPDATE cookies SET value = ? WHERE id = ?",
+                        (cookie_value, cookie_id)
+                    )
+                    logger.info(f"Cookie更新成功: {cookie_id} (保留原有备注和账号信息)")
+                else:
+                    # 记录不存在，插入新记录
+                    if user_id is None:
                         # 获取admin用户ID作为默认值
                         self._execute_sql(cursor, "SELECT id FROM users WHERE username = 'admin'")
                         admin_user = cursor.fetchone()
                         user_id = admin_user[0] if admin_user else 1
 
-                self._execute_sql(cursor,
-                    "INSERT OR REPLACE INTO cookies (id, value, user_id) VALUES (?, ?, ?)",
-                    (cookie_id, cookie_value, user_id)
-                )
+                    self._execute_sql(cursor,
+                        "INSERT INTO cookies (id, value, user_id) VALUES (?, ?, ?)",
+                        (cookie_id, cookie_value, user_id)
+                    )
+                    logger.info(f"Cookie新增成功: {cookie_id} (用户ID: {user_id})")
 
                 self.conn.commit()
-                logger.info(f"Cookie保存成功: {cookie_id} (用户ID: {user_id})")
 
                 # 验证保存结果
                 self._execute_sql(cursor, "SELECT user_id FROM cookies WHERE id = ?", (cookie_id,))
@@ -3953,12 +3984,25 @@ class DBManager:
                     columns = [description[0] for description in cursor.description]
                     item_info = dict(zip(columns, row))
 
-                    # 解析item_detail JSON
+                    # 解析item_detail JSON 并提取图片 URL
                     if item_info.get('item_detail'):
                         try:
-                            item_info['item_detail_parsed'] = json.loads(item_info['item_detail'])
+                            detail_data = json.loads(item_info['item_detail'])
+                            item_info['item_detail_parsed'] = detail_data
+
+                            # 提取图片 URL
+                            pic_info = detail_data.get('pic_info', {})
+                            item_image = pic_info.get('picUrl', '')
+                            if not item_image:
+                                detail_params = detail_data.get('detail_params', {})
+                                item_image = detail_params.get('picUrl', '')
+                            item_info['item_image'] = item_image
                         except:
                             item_info['item_detail_parsed'] = {}
+                            item_info['item_image'] = ''
+                    else:
+                        item_info['item_image'] = ''
+
                     logger.info(f"item_info: {item_info}")
                     return item_info
                 return None
@@ -4077,12 +4121,24 @@ class DBManager:
                 for row in cursor.fetchall():
                     item_info = dict(zip(columns, row))
 
-                    # 解析item_detail JSON
+                    # 解析item_detail JSON 并提取图片 URL
                     if item_info.get('item_detail'):
                         try:
-                            item_info['item_detail_parsed'] = json.loads(item_info['item_detail'])
+                            detail_data = json.loads(item_info['item_detail'])
+                            item_info['item_detail_parsed'] = detail_data
+
+                            # 提取图片 URL
+                            pic_info = detail_data.get('pic_info', {})
+                            item_image = pic_info.get('picUrl', '')
+                            if not item_image:
+                                detail_params = detail_data.get('detail_params', {})
+                                item_image = detail_params.get('picUrl', '')
+                            item_info['item_image'] = item_image
                         except:
                             item_info['item_detail_parsed'] = {}
+                            item_info['item_image'] = ''
+                    else:
+                        item_info['item_image'] = ''
 
                     items.append(item_info)
 
@@ -4249,14 +4305,15 @@ class DBManager:
                               item_category, item_price, item_detail))
 
                         if cursor.rowcount == 0:
-                            # 记录已存在，进行条件更新
+                            # 记录已存在，进行更新
+                            # item_detail 总是用新数据覆盖（同步的数据包含图片等完整信息）
                             update_sql = '''
                             UPDATE item_info SET
-                                item_title = CASE WHEN (item_title IS NULL OR item_title = '') AND ? != '' THEN ? ELSE item_title END,
+                                item_title = CASE WHEN ? != '' THEN ? ELSE item_title END,
                                 item_description = CASE WHEN (item_description IS NULL OR item_description = '') AND ? != '' THEN ? ELSE item_description END,
-                                item_category = CASE WHEN (item_category IS NULL OR item_category = '') AND ? != '' THEN ? ELSE item_category END,
-                                item_price = CASE WHEN (item_price IS NULL OR item_price = '') AND ? != '' THEN ? ELSE item_price END,
-                                item_detail = CASE WHEN (item_detail IS NULL OR item_detail = '' OR TRIM(item_detail) = '') AND ? != '' THEN ? ELSE item_detail END,
+                                item_category = CASE WHEN ? != '' THEN ? ELSE item_category END,
+                                item_price = CASE WHEN ? != '' THEN ? ELSE item_price END,
+                                item_detail = CASE WHEN ? != '' THEN ? ELSE item_detail END,
                                 updated_at = CURRENT_TIMESTAMP
                             WHERE cookie_id = ? AND item_id = ?
                             '''
@@ -5246,12 +5303,13 @@ class DBManager:
             logger.error(f"更新风控日志失败: {e}")
             return False
 
-    def get_risk_control_logs(self, cookie_id: str = None, limit: int = 100, offset: int = 0) -> List[Dict]:
+    def get_risk_control_logs(self, cookie_id: str = None, cookie_ids: list = None, limit: int = 100, offset: int = 0) -> List[Dict]:
         """
         获取风控日志列表
 
         Args:
-            cookie_id: Cookie ID，为None时获取所有日志
+            cookie_id: 单个 Cookie ID
+            cookie_ids: Cookie ID 列表（多个）
             limit: 限制返回数量
             offset: 偏移量
 
@@ -5262,7 +5320,9 @@ class DBManager:
             with self.lock:
                 cursor = self.conn.cursor()
 
+                # 确定查询条件
                 if cookie_id:
+                    # 单个 cookie_id
                     cursor.execute('''
                         SELECT r.*, c.id as cookie_name
                         FROM risk_control_logs r
@@ -5271,7 +5331,20 @@ class DBManager:
                         ORDER BY r.created_at DESC
                         LIMIT ? OFFSET ?
                     ''', (cookie_id, limit, offset))
+                elif cookie_ids and len(cookie_ids) > 0:
+                    # 多个 cookie_ids，使用 IN 子句
+                    placeholders = ','.join(['?' for _ in cookie_ids])
+                    query = f'''
+                        SELECT r.*, c.id as cookie_name
+                        FROM risk_control_logs r
+                        LEFT JOIN cookies c ON r.cookie_id = c.id
+                        WHERE r.cookie_id IN ({placeholders})
+                        ORDER BY r.created_at DESC
+                        LIMIT ? OFFSET ?
+                    '''
+                    cursor.execute(query, (*cookie_ids, limit, offset))
                 else:
+                    # 获取所有
                     cursor.execute('''
                         SELECT r.*, c.id as cookie_name
                         FROM risk_control_logs r
@@ -5292,12 +5365,13 @@ class DBManager:
             logger.error(f"获取风控日志失败: {e}")
             return []
 
-    def get_risk_control_logs_count(self, cookie_id: str = None) -> int:
+    def get_risk_control_logs_count(self, cookie_id: str = None, cookie_ids: list = None) -> int:
         """
         获取风控日志总数
 
         Args:
-            cookie_id: Cookie ID，为None时获取所有日志数量
+            cookie_id: 单个 Cookie ID
+            cookie_ids: Cookie ID 列表
 
         Returns:
             int: 日志总数
@@ -5308,6 +5382,11 @@ class DBManager:
 
                 if cookie_id:
                     cursor.execute('SELECT COUNT(*) FROM risk_control_logs WHERE cookie_id = ?', (cookie_id,))
+                elif cookie_ids and len(cookie_ids) > 0:
+                    # 多个 cookie_ids
+                    placeholders = ','.join(['?' for _ in cookie_ids])
+                    query = f'SELECT COUNT(*) FROM risk_control_logs WHERE cookie_id IN ({placeholders})'
+                    cursor.execute(query, tuple(cookie_ids))
                 else:
                     cursor.execute('SELECT COUNT(*) FROM risk_control_logs')
 
@@ -5335,7 +5414,127 @@ class DBManager:
         except Exception as e:
             logger.error(f"删除风控日志失败: {e}")
             return False
-    
+
+    # ==================== 登录日志管理 ====================
+
+    def add_login_log(self, username: str, action: str, status: str, ip_address: str = None,
+                      user_agent: str = None, reason: str = None) -> bool:
+        """
+        添加登录日志记录
+
+        Args:
+            username: 用户名
+            action: 操作类型 (login/logout/login_failed)
+            status: 状态 (success/failed)
+            ip_address: IP 地址
+            user_agent: 用户代理（设备信息）
+            reason: 原因（失败原因）
+
+        Returns:
+            bool: 添加成功返回True，失败返回False
+        """
+        try:
+            with self.lock:
+                cursor = self.conn.cursor()
+                cursor.execute('''
+                    INSERT INTO login_logs
+                    (username, action, status, ip_address, user_agent, reason)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (username, action, status, ip_address, user_agent, reason))
+                self.conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"添加登录日志失败: {e}")
+            return False
+
+    def get_login_logs(self, username: str = None, action: str = None,
+                       limit: int = 100, offset: int = 0) -> List[Dict]:
+        """
+        获取登录日志列表
+
+        Args:
+            username: 用户名过滤
+            action: 操作类型过滤 (login/logout/login_failed)
+            limit: 限制返回数量
+            offset: 偏移量
+
+        Returns:
+            List[Dict]: 登录日志列表
+        """
+        try:
+            with self.lock:
+                cursor = self.conn.cursor()
+
+                # 构建查询条件
+                conditions = []
+                params = []
+
+                if username:
+                    conditions.append("username = ?")
+                    params.append(username)
+                if action:
+                    conditions.append("action = ?")
+                    params.append(action)
+
+                where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+                query = f'''
+                    SELECT * FROM login_logs
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                '''
+
+                cursor.execute(query, (*params, limit, offset))
+
+                columns = [description[0] for description in cursor.description]
+                logs = []
+
+                for row in cursor.fetchall():
+                    log_info = dict(zip(columns, row))
+                    logs.append(log_info)
+
+                return logs
+        except Exception as e:
+            logger.error(f"获取登录日志失败: {e}")
+            return []
+
+    def get_login_logs_count(self, username: str = None, action: str = None) -> int:
+        """
+        获取登录日志总数
+
+        Args:
+            username: 用户名过滤
+            action: 操作类型过滤
+
+        Returns:
+            int: 日志总数
+        """
+        try:
+            with self.lock:
+                cursor = self.conn.cursor()
+
+                # 构建查询条件
+                conditions = []
+                params = []
+
+                if username:
+                    conditions.append("username = ?")
+                    params.append(username)
+                if action:
+                    conditions.append("action = ?")
+                    params.append(action)
+
+                where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+                query = f'SELECT COUNT(*) FROM login_logs WHERE {where_clause}'
+                cursor.execute(query, tuple(params))
+
+                return cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"获取登录日志总数失败: {e}")
+            return 0
+
     def cleanup_old_data(self, days: int = 90) -> dict:
         """清理过期的历史数据，防止数据库无限增长
         

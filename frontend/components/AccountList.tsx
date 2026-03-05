@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { AccountDetail, AIReplySettings } from '../types';
 import {
@@ -54,6 +54,24 @@ const AccountList: React.FC = () => {
     custom_prompts: '',
   });
   const [saving, setSaving] = useState(false);
+
+  // 用于存储轮询 interval 的 ref
+  const qrPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 清除轮询的函数
+  const clearQRPollInterval = () => {
+    if (qrPollIntervalRef.current) {
+      clearInterval(qrPollIntervalRef.current);
+      qrPollIntervalRef.current = null;
+    }
+  };
+
+  // 组件卸载时清除轮询
+  useEffect(() => {
+    return () => {
+      clearQRPollInterval();
+    };
+  }, []);
 
   const loadAccounts = async () => {
     setLoading(true);
@@ -205,6 +223,9 @@ const AccountList: React.FC = () => {
   };
 
   const startQRLogin = async () => {
+    // 先清除之前的轮询
+    clearQRPollInterval();
+
     setShowQRModal(true);
     setQrStatus('loading');
     try {
@@ -213,17 +234,17 @@ const AccountList: React.FC = () => {
         setQrCodeUrl(res.qr_code_url);
         setQrStatus('waiting');
 
-        const interval = setInterval(async () => {
+        qrPollIntervalRef.current = setInterval(async () => {
           const statusRes = await checkQRLoginStatus(res.session_id!);
           if (statusRes.status === 'success') {
-            clearInterval(interval);
+            clearQRPollInterval();
             setQrStatus('success');
             setTimeout(() => {
               setShowQRModal(false);
               loadAccounts();
             }, 1000);
           } else if (statusRes.status === 'expired' || statusRes.status === 'error') {
-            clearInterval(interval);
+            clearQRPollInterval();
             setQrStatus('error');
           }
         }, 2000);
@@ -231,6 +252,12 @@ const AccountList: React.FC = () => {
     } catch (e) {
       setQrStatus('error');
     }
+  };
+
+  // 关闭二维码弹窗
+  const closeQRModal = () => {
+    clearQRPollInterval();
+    setShowQRModal(false);
   };
 
   if (loading) return <div className="p-20 flex justify-center"><Loader2 className="w-8 h-8 text-[#FFE815] animate-spin"/></div>;
@@ -332,15 +359,15 @@ const AccountList: React.FC = () => {
       {/* QR Code Modal */}
       {showQRModal && createPortal(
           <div className="modal-overlay-centered">
-              <div className="modal-container" style={{maxWidth: '24rem'}}>
+              <div className="modal-container" style={{maxWidth: '24rem', position: 'relative'}}>
                   <button
-                    onClick={() => setShowQRModal(false)}
-                    className="self-end p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors mb-6"
+                    onClick={closeQRModal}
+                    className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors z-10"
                   >
                     <X className="w-5 h-5 text-gray-600" />
                   </button>
 
-                  <div className="modal-body">
+                  <div className="modal-body pt-6">
                       <div className="text-center">
                           <h3 className="text-2xl font-extrabold text-gray-900 mb-2">扫码登录</h3>
                           <p className="text-gray-500 mb-8 font-medium">请打开闲鱼APP扫描下方二维码</p>
@@ -437,15 +464,9 @@ const AccountList: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setEditForm({ ...editForm, auto_confirm: !editForm.auto_confirm })}
-                  className={`w-14 h-8 rounded-full transition-colors duration-300 relative ${
-                    editForm.auto_confirm ? 'bg-[#FFE815]' : 'bg-gray-300'
-                  }`}
+                  className={`switch-toggle ${editForm.auto_confirm ? 'active' : 'inactive'}`}
                 >
-                  <span
-                    className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-300 ${
-                      editForm.auto_confirm ? 'translate-x-7' : 'translate-x-1'
-                    }`}
-                  />
+                  <span className="switch-toggle-thumb" />
                 </button>
               </div>
 
@@ -511,15 +532,9 @@ const AccountList: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setEditForm({ ...editForm, show_browser: !editForm.show_browser })}
-                      className={`w-14 h-8 rounded-full transition-colors duration-300 relative ${
-                        editForm.show_browser ? 'bg-[#FFE815]' : 'bg-gray-300'
-                      }`}
+                      className={`switch-toggle ${editForm.show_browser ? 'active' : 'inactive'}`}
                     >
-                      <span
-                        className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-300 ${
-                          editForm.show_browser ? 'translate-x-7' : 'translate-x-1'
-                        }`}
-                      />
+                      <span className="switch-toggle-thumb" />
                     </button>
                   </div>
                 </div>
@@ -583,15 +598,9 @@ const AccountList: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setAiSettings({ ...aiSettings, ai_enabled: !aiSettings.ai_enabled })}
-                  className={`w-14 h-8 rounded-full transition-colors duration-300 relative ${
-                    aiSettings.ai_enabled ? 'bg-[#FFE815]' : 'bg-gray-300'
-                  }`}
+                  className={`switch-toggle ${aiSettings.ai_enabled ? 'active' : 'inactive'}`}
                 >
-                  <span
-                    className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-300 ${
-                      aiSettings.ai_enabled ? 'translate-x-7' : 'translate-x-1'
-                    }`}
-                  />
+                  <span className="switch-toggle-thumb" />
                 </button>
               </div>
 

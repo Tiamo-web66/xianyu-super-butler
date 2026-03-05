@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form, Body, Query
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form, Body, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -497,8 +497,15 @@ async def register_route():
 
 # 登录接口
 @app.post('/login')
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, http_request: Request = None):
     from db_manager import db_manager
+
+    # 获取客户端信息
+    client_ip = None
+    user_agent = None
+    if http_request:
+        client_ip = http_request.client.host if http_request.client else None
+        user_agent = http_request.headers.get("user-agent", "")[:500] if http_request.headers else None
 
     # 判断登录方式
     if request.username and request.password:
@@ -518,8 +525,18 @@ async def login(request: LoginRequest):
                     'timestamp': time.time()
                 }
 
+                # 记录登录日志
+                is_admin_user = user['username'] == ADMIN_USERNAME
+                db_manager.add_login_log(
+                    username=user['username'],
+                    action='login',
+                    status='success',
+                    ip_address=client_ip,
+                    user_agent=user_agent
+                )
+
                 # 区分管理员和普通用户的日志
-                if user['username'] == ADMIN_USERNAME:
+                if is_admin_user:
                     logger.info(f"【{user['username']}#{user['id']}】登录成功（管理员）")
                 else:
                     logger.info(f"【{user['username']}#{user['id']}】登录成功")
@@ -530,8 +547,18 @@ async def login(request: LoginRequest):
                     message="登录成功",
                     user_id=user['id'],
                     username=user['username'],
-                    is_admin=(user['username'] == ADMIN_USERNAME)
+                    is_admin=is_admin_user
                 )
+
+        # 记录登录失败日志
+        db_manager.add_login_log(
+            username=request.username,
+            action='login',
+            status='failed',
+            ip_address=client_ip,
+            user_agent=user_agent,
+            reason='用户名或密码错误'
+        )
 
         logger.warning(f"【{request.username}】登录失败：用户名或密码错误")
         return LoginResponse(
@@ -554,6 +581,15 @@ async def login(request: LoginRequest):
                 'timestamp': time.time()
             }
 
+            # 记录登录日志
+            db_manager.add_login_log(
+                username=user['username'],
+                action='login',
+                status='success',
+                ip_address=client_ip,
+                user_agent=user_agent
+            )
+
             logger.info(f"【{user['username']}#{user['id']}】邮箱登录成功")
 
             return LoginResponse(
@@ -564,6 +600,16 @@ async def login(request: LoginRequest):
                 username=user['username'],
                 is_admin=(user['username'] == ADMIN_USERNAME)
             )
+
+        # 记录登录失败日志
+        db_manager.add_login_log(
+            username=request.email,
+            action='login',
+            status='failed',
+            ip_address=client_ip,
+            user_agent=user_agent,
+            reason='邮箱或密码错误'
+        )
 
         logger.warning(f"【{request.email}】邮箱登录失败：邮箱或密码错误")
         return LoginResponse(
@@ -577,6 +623,15 @@ async def login(request: LoginRequest):
 
         # 验证邮箱验证码
         if not db_manager.verify_email_code(request.email, request.verification_code, 'login'):
+            # 记录登录失败日志
+            db_manager.add_login_log(
+                username=request.email,
+                action='login',
+                status='failed',
+                ip_address=client_ip,
+                user_agent=user_agent,
+                reason='验证码错误或已过期'
+            )
             logger.warning(f"【{request.email}】验证码登录失败：验证码错误或已过期")
             return LoginResponse(
                 success=False,
@@ -586,6 +641,15 @@ async def login(request: LoginRequest):
         # 获取用户信息
         user = db_manager.get_user_by_email(request.email)
         if not user:
+            # 记录登录失败日志
+            db_manager.add_login_log(
+                username=request.email,
+                action='login',
+                status='failed',
+                ip_address=client_ip,
+                user_agent=user_agent,
+                reason='用户不存在'
+            )
             logger.warning(f"【{request.email}】验证码登录失败：用户不存在")
             return LoginResponse(
                 success=False,
@@ -600,6 +664,15 @@ async def login(request: LoginRequest):
             'is_admin': user.get('is_admin', False) or user['username'] == ADMIN_USERNAME,
             'timestamp': time.time()
         }
+
+        # 记录登录日志
+        db_manager.add_login_log(
+            username=user['username'],
+            action='login',
+            status='success',
+            ip_address=client_ip,
+            user_agent=user_agent
+        )
 
         logger.info(f"【{user['username']}#{user['id']}】验证码登录成功")
 
@@ -633,11 +706,44 @@ async def verify(user_info: Optional[Dict[str, Any]] = Depends(verify_token)):
 
 
 # 登出接口
-@app.post('/logout')
-async def logout(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    if credentials and credentials.credentials in SESSION_TOKENS:
-        del SESSION_TOKENS[credentials.credentials]
-    return {"message": "已登出"}
+@app.get("/login-logs")
+async def get_login_logs(
+    username: str = None,
+    action: str = None,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(require_auth)
+):
+    """获取登录日志（管理员可查看全部，普通用户只能查看自己的）"""
+    try:
+        # 判断是否为管理员
+        is_admin = current_user.get('is_admin', False) or current_user.get('username') == 'admin'
+
+        # 普通用户只能查看自己（或强制限制）
+        if not is_admin:
+            # 如果未提供用户名，则使用当前用户的用户名
+            if not username:
+                username = current_user.get('username')
+            # 普通用户不允许指定 action 过滤以防泄露
+            # 仍然可以查看所有自己的登录日志
+        # 查询日志
+        logs = db_manager.get_login_logs(username=username, action=action, limit=limit, offset=offset)
+        total_count = db_manager.get_login_logs_count(username=username, action=action)
+
+        log_with_user('info', f"查询登录日志 username={username} action={action} limit={limit} offset={offset}", current_user)
+
+        return {
+            "success": True,
+            "data": logs,
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+            "is_admin": is_admin
+        }
+    except Exception as e:
+        log_with_user('error', f"获取登录日志失败: {str(e)}", current_user)
+        return {"success": False, "message": f"获取登录日志失败: {str(e)}"}
+
 
 
 # 修改管理员密码接口
@@ -1075,6 +1181,16 @@ async def register(request: RegisterRequest):
                 message="该邮箱已被注册"
             )
 
+        # 验证密码格式（从系统配置读取，默认正则）
+        password_pattern = db_manager.get_system_setting('password_pattern') or '(?=.*[0-9])(?=.*[a-zA-Z]).{8,20}'
+        import re
+        if not re.match(password_pattern, request.password):
+            logger.warning(f"【{request.username}】注册失败: 密码格式不符合要求")
+            return RegisterResponse(
+                success=False,
+                message="密码需8-20位，含字母和数字"
+            )
+
         # 创建用户
         if db_manager.create_user(request.username, request.email, request.password):
             logger.info(f"【{request.username}】注册成功")
@@ -1368,7 +1484,10 @@ def get_cookies_details(current_user: Dict[str, Any] = Depends(get_current_user)
             'enabled': cookie_enabled,
             'auto_confirm': auto_confirm,
             'remark': remark,
-            'pause_duration': cookie_details.get('pause_duration', 10) if cookie_details else 10
+            'pause_duration': cookie_details.get('pause_duration', 10) if cookie_details else 10,
+            'username': cookie_details.get('username', '') if cookie_details else '',
+            'login_password': cookie_details.get('password', '') if cookie_details else '',
+            'show_browser': cookie_details.get('show_browser', False) if cookie_details else False
         })
     return result
 
@@ -2910,7 +3029,7 @@ def get_public_system_settings():
     try:
         all_settings = db_manager.get_all_system_settings()
         # 只返回公开的配置项
-        public_keys = {"registration_enabled", "show_default_login_info", "login_captcha_enabled"}
+        public_keys = {"registration_enabled", "show_default_login_info", "login_captcha_enabled", "guest_trial_enabled"}
         return {k: v for k, v in all_settings.items() if k in public_keys}
     except Exception as e:
         logger.error(f"获取公开系统设置失败: {e}")
@@ -2918,7 +3037,8 @@ def get_public_system_settings():
         return {
             "registration_enabled": "true",
             "show_default_login_info": "true",
-            "login_captcha_enabled": "true"
+            "login_captcha_enabled": "true",
+            "guest_trial_enabled": "true"
         }
 
 
@@ -2934,6 +3054,22 @@ def get_system_settings(_: None = Depends(require_auth)):
         return settings
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/system-settings/{key}')
+def get_single_system_setting(key: str):
+    """获取单个系统设置（公开）"""
+    from db_manager import db_manager
+    # 允许公开访问的设置项
+    allowed_keys = {"password_pattern", "password_hint"}
+    if key not in allowed_keys:
+        raise HTTPException(status_code=403, detail='不允许访问')
+    try:
+        value = db_manager.get_system_setting(key)
+        return {"value": value or ""}
+    except Exception as e:
+        logger.error(f"获取系统设置失败: {e}")
+        return {"value": ""}
 
 
 @app.put('/system-settings/{key}')
@@ -3003,6 +3139,27 @@ def get_login_info_status():
     except Exception as e:
         logger.error(f"获取登录信息显示状态失败: {e}")
         # 出错时默认为开启
+        return {"enabled": True}
+
+
+@app.get('/guest-trial-status')
+def get_guest_trial_status():
+    """获取游客试用开关状态（公开接口，无需认证）"""
+    from db_manager import db_manager
+    try:
+        enabled_str = db_manager.get_system_setting('guest_trial_enabled')
+        logger.debug(f"从数据库获取的游客试用设置值: '{enabled_str}'")
+
+        # 如果设置不存在，默认为开启
+        if enabled_str is None:
+            enabled_bool = True
+        else:
+            enabled_bool = enabled_str == 'true'
+
+        return {"enabled": enabled_bool}
+    except Exception as e:
+        logger.error(f"获取游客试用状态失败: {e}")
+        # 出错时默认开启
         return {"enabled": True}
 
 
@@ -3474,7 +3631,7 @@ def get_items_list(cid: str, current_user: Dict[str, Any] = Depends(get_current_
         with db_manager.lock:
             cursor = db_manager.conn.cursor()
             cursor.execute('''
-            SELECT item_id, item_title, item_price, created_at
+            SELECT item_id, item_title, item_price, item_detail, created_at
             FROM item_info
             WHERE cookie_id = ?
             ORDER BY created_at DESC
@@ -3482,11 +3639,29 @@ def get_items_list(cid: str, current_user: Dict[str, Any] = Depends(get_current_
 
             items = []
             for row in cursor.fetchall():
+                item_id, item_title, item_price, item_detail, created_at = row
+
+                # 从 item_detail 中提取图片 URL
+                item_image = ''
+                if item_detail:
+                    try:
+                        detail_data = json.loads(item_detail)
+                        # 尝试从 pic_info.picUrl 获取图片
+                        pic_info = detail_data.get('pic_info', {})
+                        item_image = pic_info.get('picUrl', '')
+                        # 如果没有，尝试从 detail_params.picUrl 获取
+                        if not item_image:
+                            detail_params = detail_data.get('detail_params', {})
+                            item_image = detail_params.get('picUrl', '')
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
                 items.append({
-                    'item_id': row[0],
-                    'item_title': row[1] or '未知商品',
-                    'item_price': row[2] or '价格未知',
-                    'created_at': row[3]
+                    'item_id': item_id,
+                    'item_title': item_title or '未知商品',
+                    'item_price': item_price or '价格未知',
+                    'item_image': item_image,
+                    'created_at': created_at
                 })
 
             return {"items": items, "count": len(items)}
@@ -4698,19 +4873,32 @@ def test_ai_reply(cookie_id: str, test_data: dict, _: None = Depends(require_aut
 # ==================== 日志管理API ====================
 
 @app.get("/logs")
-async def get_logs(lines: int = 200, level: str = None, source: str = None, _: None = Depends(require_auth)):
-    """获取实时系统日志"""
+async def get_logs(lines: int = 200, level: str = None, source: str = None, current_user: Dict[str, Any] = Depends(require_auth)):
+    """获取实时系统日志 - 普通用户只返回本人日志，管理员返回全部"""
     try:
         # 获取文件日志收集器
         collector = get_file_log_collector()
 
         # 获取日志
-        logs = collector.get_logs(lines=lines, level_filter=level, source_filter=source)
+        all_logs = collector.get_logs(lines=lines * 5, level_filter=level, source_filter=source)
 
-        return {"success": True, "logs": logs}
+        # 判断是否为管理员
+        is_admin = current_user.get('is_admin', False) or current_user.get('username') == 'admin'
+
+        if is_admin:
+            # 管理员返回全部日志
+            logs = all_logs[:lines]
+        else:
+            # 普通用户只返回与本人相关的日志
+            # 日志格式: {"timestamp": ..., "level": ..., "source": ..., "message": "【username#user_id】 ..."}
+            user_keyword = f"【{current_user['username']}#{current_user['user_id']}】"
+            user_logs = [log for log in all_logs if user_keyword in log.get('message', '')]
+            logs = user_logs[:lines]
+
+        return {"success": True, "logs": logs, "is_admin": is_admin}
 
     except Exception as e:
-        return {"success": False, "message": f"获取日志失败: {str(e)}", "logs": []}
+        return {"success": False, "message": f"获取日志失败: {str(e)}", "logs": [], "is_admin": False}
 
 
 @app.get("/risk-control-logs")
@@ -4718,28 +4906,51 @@ async def get_risk_control_logs(
     cookie_id: str = None,
     limit: int = 100,
     offset: int = 0,
-    admin_user: Dict[str, Any] = Depends(require_admin)
+    current_user: Dict[str, Any] = Depends(require_auth)
 ):
-    """获取风控日志（管理员专用）"""
+    """获取风控日志（管理员查看全部，普通用户只看自己账号的）"""
     try:
-        log_with_user('info', f"查询风控日志: cookie_id={cookie_id}, limit={limit}, offset={offset}", admin_user)
+        # 判断是否为管理员
+        is_admin = current_user.get('is_admin', False) or current_user.get('username') == 'admin'
 
-        # 获取风控日志
-        logs = db_manager.get_risk_control_logs(cookie_id=cookie_id, limit=limit, offset=offset)
-        total_count = db_manager.get_risk_control_logs_count(cookie_id=cookie_id)
+        # 如果不是管理员，只允许查看自己账号的风控日志
+        if not is_admin and not cookie_id:
+            # 获取当前用户的所有账号
+            user_cookies = db_manager.get_all_cookies(user_id=current_user.get('user_id'))
+            user_cookie_ids = list(user_cookies.keys())
+            if not user_cookie_ids:
+                return {
+                    "success": True,
+                    "data": [],
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "is_admin": False
+                }
+            # 查询这些账号的风控日志（需要修改 db_manager 支持多 cookie_id）
+            logs = db_manager.get_risk_control_logs(cookie_ids=user_cookie_ids, limit=limit, offset=offset)
+            total_count = db_manager.get_risk_control_logs_count(cookie_ids=user_cookie_ids)
+        else:
+            # 管理员或指定了 cookie_id
+            logs = db_manager.get_risk_control_logs(cookie_id=cookie_id, limit=limit, offset=offset)
+            total_count = db_manager.get_risk_control_logs_count(cookie_id=cookie_id)
 
-        log_with_user('info', f"风控日志查询成功，共 {len(logs)} 条记录，总计 {total_count} 条", admin_user)
+        log_with_user('info', f"查询风控日志: cookie_id={cookie_id}, limit={limit}, offset={offset}", current_user)
+        log_with_user('info', f"风控日志查询成功，共 {len(logs)} 条记录，总计 {total_count} 条", current_user)
+
+        is_admin = current_user.get('is_admin', False) or current_user.get('username') == 'admin'
 
         return {
             "success": True,
             "data": logs,
             "total": total_count,
             "limit": limit,
-            "offset": offset
+            "offset": offset,
+            "is_admin": is_admin
         }
 
     except Exception as e:
-        log_with_user('error', f"获取风控日志失败: {str(e)}", admin_user)
+        log_with_user('error', f"获取风控日志失败: {str(e)}", current_user)
         return {
             "success": False,
             "message": f"获取风控日志失败: {str(e)}",
@@ -4771,25 +4982,96 @@ async def delete_risk_control_log(
         return {"success": False, "message": f"删除失败: {str(e)}"}
 
 
-@app.get("/logs/stats")
-async def get_log_stats(_: None = Depends(require_auth)):
-    """获取日志统计信息"""
-    try:
-        collector = get_file_log_collector()
-        stats = collector.get_stats()
+# ==================== 登录日志 API ====================
 
-        return {"success": True, "stats": stats}
+@app.get("/login-logs")
+async def get_login_logs(
+    username: str = None,
+    action: str = None,
+    limit: int = 100,
+    offset: int = 0,
+    admin_user: Dict[str, Any] = Depends(require_admin)
+):
+    """获取登录日志（仅管理员）"""
+    try:
+        log_with_user('info', f"查询登录日志: username={username}, action={action}, limit={limit}, offset={offset}", admin_user)
+
+        # 获取登录日志
+        logs = db_manager.get_login_logs(username=username, action=action, limit=limit, offset=offset)
+        total_count = db_manager.get_login_logs_count(username=username, action=action)
+
+        log_with_user('info', f"登录日志查询成功，共 {len(logs)} 条记录，总计 {total_count} 条", admin_user)
+
+        return {
+            "success": True,
+            "data": logs,
+            "total": total_count,
+            "limit": limit,
+            "offset": offset
+        }
 
     except Exception as e:
-        return {"success": False, "message": f"获取日志统计失败: {str(e)}", "stats": {}}
+        log_with_user('error', f"获取登录日志失败: {str(e)}", admin_user)
+        return {
+            "success": False,
+            "message": f"获取登录日志失败: {str(e)}",
+            "data": [],
+            "total": 0
+        }
+
+
+@app.get("/logs/stats")
+async def get_log_stats(current_user: Dict[str, Any] = Depends(require_auth)):
+    """获取日志统计信息 - 普通用户只返回本人日志统计，管理员返回全部"""
+    try:
+        collector = get_file_log_collector()
+
+        # 判断是否为管理员
+        is_admin = current_user.get('is_admin', False) or current_user.get('username') == 'admin'
+
+        if is_admin:
+            # 管理员返回全部统计
+            stats = collector.get_stats()
+        else:
+            # 普通用户只返回本人日志的统计
+            user_keyword = f"【{current_user['username']}#{current_user['user_id']}】"
+
+            # 过滤当前用户日志
+            user_logs = [log for log in collector.logs if user_keyword in log.get('message', '')]
+
+            # 统计各级别数量
+            level_counts = {}
+            source_counts = {}
+
+            for log in user_logs:
+                level = log.get('level', 'UNKNOWN')
+                source = log.get('source', 'unknown')
+
+                level_counts[level] = level_counts.get(level, 0) + 1
+                source_counts[source] = source_counts.get(source, 0) + 1
+
+            stats = {
+                "total_logs": len(user_logs),
+                "level_counts": level_counts,
+                "source_counts": source_counts,
+                "max_logs": collector.max_logs,
+                "is_filtered": True
+            }
+
+        return {"success": True, "stats": stats, "is_admin": is_admin}
+
+    except Exception as e:
+        return {"success": False, "message": f"获取日志统计失败: {str(e)}", "stats": {}, "is_admin": False}
 
 
 @app.post("/logs/clear")
-async def clear_logs(_: None = Depends(require_auth)):
-    """清空日志"""
+async def clear_logs(admin_user: Dict[str, Any] = Depends(require_admin)):
+    """清空日志（仅管理员）"""
     try:
         collector = get_file_log_collector()
         collector.clear_logs()
+
+        log_with_user('info', '管理员清空了系统日志', admin_user)
 
         return {"success": True, "message": "日志已清空"}
 
@@ -7177,4 +7459,4 @@ async def catch_all_route(path: str):
 
 # 移除自动启动，由Start.py或手动启动
 # if __name__ == "__main__":
-#     uvicorn.run(app, host="0.0.0.0", port=8080)
+#     uvicorn.run(app, host="0.0.0.0", port=8090)

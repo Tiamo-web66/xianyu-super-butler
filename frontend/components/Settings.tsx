@@ -114,6 +114,49 @@ const Settings: React.FC = () => {
 
               <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
                 <div>
+                  <div className="font-bold text-gray-900">允许游客试用</div>
+                  <div className="text-xs text-gray-500 mt-1">登录页面显示游客试用按钮</div>
+                </div>
+                <button
+                  onClick={() => setSettings({...settings, guest_trial_enabled: !settings.guest_trial_enabled})}
+                  className={`w-14 h-8 rounded-full transition-all relative ${
+                    settings.guest_trial_enabled ? 'bg-[#FFE815]' : 'bg-gray-300'
+                  }`}
+                >
+                  <div
+                    className={`w-6 h-6 bg-white rounded-full absolute top-1 transition-all shadow-md ${
+                      settings.guest_trial_enabled ? 'left-7' : 'left-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block text-sm font-bold text-gray-800">注册密码正则规则</label>
+                <input
+                  type="text"
+                  value={settings.password_pattern || '(?=.*[0-9])(?=.*[a-zA-Z]).{8,20}'}
+                  onChange={e => setSettings({...settings, password_pattern: e.target.value})}
+                  placeholder="(?=.*[0-9])(?=.*[a-zA-Z]).{8,20}"
+                  className="w-full ios-input px-4 py-3 rounded-xl text-sm"
+                />
+                <div className="text-xs text-gray-500">用于验证用户注册时的密码格式，默认：8-20位，含字母和数字</div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block text-sm font-bold text-gray-800">注册密码提示说明</label>
+                <input
+                  type="text"
+                  value={settings.password_hint || ''}
+                  onChange={e => setSettings({...settings, password_hint: e.target.value})}
+                  placeholder="例如：密码必须包含字母和数字，长度8-20位"
+                  className="w-full ios-input px-4 py-3 rounded-xl text-sm"
+                />
+                <div className="text-xs text-gray-500">在注册页面显示的密码规则说明文字</div>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+                <div>
                   <div className="font-bold text-gray-900">登录滑动验证码</div>
                   <div className="text-xs text-gray-500 mt-1">开启后账号密码登录需要完成滑动验证</div>
                 </div>
@@ -270,7 +313,13 @@ const Settings: React.FC = () => {
             </h3>
 
             <div className="ios-card rounded-[2rem] p-6 bg-white space-y-6">
-              <p className="text-sm text-gray-500">配置SMTP服务器用于发送注册验证码等邮件通知</p>
+              <p className="text-sm text-gray-500">
+                配置SMTP服务器用于发送注册验证码等邮件通知。若未填写以下任意字段，系统会自动使用
+                <a href="https://dy.zhinianboke.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                  第三方验证码API
+                </a>
+                发送邮件。
+              </p>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-3">

@@ -10,6 +10,9 @@ import sys
 import shutil
 from pathlib import Path
 
+# 默认后端端口，可通过环境变量 API_PORT 覆盖
+DEFAULT_API_PORT = 8080
+
 # 设置标准输出编码为UTF-8（Windows兼容）
 def _setup_console_encoding():
     """设置控制台编码为UTF-8，避免Windows GBK编码问题"""
@@ -574,7 +577,7 @@ def _start_api_server():
 
     # 优先使用环境变量配置
     host = os.getenv('API_HOST', '0.0.0.0')  # 默认绑定所有接口
-    port = int(os.getenv('API_PORT', '8080'))  # 默认端口8080
+    port = int(os.getenv('API_PORT', str(DEFAULT_API_PORT)))  # 默认端口
 
     # 如果配置文件中有特定配置，则使用配置文件
     if 'host' in api_conf:
@@ -584,11 +587,11 @@ def _start_api_server():
 
     # 兼容旧的URL配置方式
     if 'url' in api_conf and 'host' not in api_conf and 'port' not in api_conf:
-        url = api_conf.get('url', 'http://0.0.0.0:8080/xianyu/reply')
+        url = api_conf.get('url', f'http://0.0.0.0:{DEFAULT_API_PORT}/xianyu/reply')
         parsed = urlparse(url)
         if parsed.hostname and parsed.hostname != 'localhost':
             host = parsed.hostname
-        port = parsed.port or 8080
+        port = parsed.port or DEFAULT_API_PORT
 
     logger.info(f"启动Web服务器: http://{host}:{port}")
     # 在后台线程中创建独立事件循环并直接运行 server.serve()
